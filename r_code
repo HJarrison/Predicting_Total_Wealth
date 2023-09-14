@@ -1,0 +1,344 @@
+## Final Project Template
+## Name: Harrison Hanlon 
+
+
+## ---------------------------------------------------------
+## Open Data Set 
+data <- read.table('data_tr.txt', head = T)[,-1]
+
+names(data)
+head(data)
+summary(data)
+
+
+library(ggplot2)
+library(ggpubr)
+
+## ---------------------------------------------------------
+## Removing multicollinearity and rescaling variables 
+
+OLS <- lm(tw ~ ., data = data)
+summary(OLS)
+
+# We can extract the names of the X variables we want to keep:
+library(dplyr)
+data <- select(data, -hval, -hmort, -col)
+
+summary(data)
+
+
+# We may also want to standardize our variables (mean = 0, variance = 1)
+# This is useful because methods like LASSO and Ridge change based on variable scaling
+# To do this, we use the scale function.
+# We don't want to scale tw, however because that's our output variable rather than a predictor.
+X_rescaled <- as.data.frame(scale(subset(data, select = -tw)))
+tw <- data$tw
+data <- cbind(tw, X_rescaled)
+
+summary(data)
+
+## ---------------------------------------------------------
+
+# Separate out continuous and binary X variables
+
+
+continuous_X <- subset(data, select = c(ira, nifa, inc, hequity, educ, age, fsize))
+binary_X <- subset(data, select = c(e401, male, twoearn, nohs, hs, smcol, marr))
+tw <- data$tw
+
+
+
+## ---------------------------------------------------------
+summary(continuous_X)
+summary(binary_X)
+
+
+## ---------------------------------------------------------
+plot(data$inc, data$tw, cex = 0.5)
+plot(data$ira, data$tw, cex = 0.5)
+plot(data$educ, data$tw, cex = 0.5)
+plot(data$nifa, data$tw, cex = 0.5)
+
+
+## ---------------------------------------------------------
+reg <- lm(data$tw ~ data$inc)
+plot(data$inc, data$tw, 
+     cex = 0.3,
+     xlab = 'Income Differential', ylab = 'Total Wealth',
+     main = 'Income and Total Wealth',
+     col = 'blue')
+abline(reg, col = 'red', lwd = 2)
+
+reg <- lm(data$tw ~ data$ira)
+plot(data$ira, data$tw, 
+     cex = 0.3, 
+     xlab = 'IRA', ylab = 'Total Wealth', 
+     col = 'blue', 
+     main = 'IRA and Total Wealth')
+abline(reg, col = 'red', lwd = 2)
+
+reg <- lm(data$tw ~ data$educ)
+plot(data$educ, data$tw,
+      cex = 0.3,
+     xlab = 'Education (Relative to Mean)', ylab = 'Total Wealth',
+     main = 'Education and Total Wealth',
+     col = 'blue')
+abline(reg, col = 'red', lwd = 2)
+
+reg <- lm(data$tw ~ data$nifa)
+plot(data$nifa, data$tw, 
+     cex = 0.3,
+     xlab = 'non 401k assets', ylab = 'Total Wealth',
+     main = 'Assets and Total Wealth',
+     col = 'blue')
+abline(reg, col ='red', lwd = 2)
+
+reg <- lm(data$tw ~ data$age)
+plot(data$age, data$tw,
+     cex = 0.3,
+     xlab = 'Age (Relative to Mean)', ylab = 'Total Wealth',
+     main = 'Age and Total Wealth',
+     col = 'blue')
+abline(reg, col = 'red', lwd = 2)
+
+## ---------------------------------------------------------
+hist(data$tw,
+     xlab = 'Total Wealth', ylab = 'Amount of Data',
+     main = 'Histogram With Outliars')
+
+## ---------------------------------------------------------
+# Checks which observations are outliers
+
+# Makes a new dataset without outliers
+
+z_scores <- apply(data, 2, function(x) abs(scale(x)))
+
+data_no_outliers <- data[rowSums(z_scores < 3.5) == ncol(z_scores),]
+
+hist(data_no_outliers$tw,
+     xlab = 'Total Wealth', ylab = 'Amount of Data',
+     main = 'Histogram Without Outliars')
+
+# Compare the new maximum observation of tw
+max(data$tw)
+min(data$tw)
+max(data_no_outliers$tw)
+min(data_no_outliers$tw)
+
+
+## Finding Interaction terms to use
+
+cont <- subset(data, select = c(ira, nifa, inc, hequity, educ, age, fsize, e401, male, twoearn, nohs, hs, smcol, marr))
+corr_mat <- cor(data +!tw)
+highcorr <- which(abs(corr_mat) > .6 & corr_mat != 1, arr.ind = TRUE)
+print(highcorr)
+
+# Model 0
+
+model0 <- lm(tw ~ ., data = data)
+summary(model0)
+
+# Model 0.5
+
+model0.5 <- lm(tw ~ nifa*marr + twoearn*hequity + marr*twoearn + ., data = data)
+summary(model0.5)
+
+
+# Model 1
+continuous_X_poly <- poly(as.matrix(continuous_X), 3)
+
+# Combine with the binary variables
+model1_X <- as.matrix(cbind(continuous_X_poly, binary_X))
+
+
+library(glmnet)
+
+
+set.seed(6123)
+l <- exp(seq(from = -4, to = 5, length = 100))
+
+model1_CV <- cv.glmnet(x = model1_X, y = tw, lambdas = l, alpha = 1)
+model1 <- glmnet(x = model1_X, y = tw, lambda = model1_CV$lambda.min, alpha = 1)
+
+
+continuous_X_poly1 <- poly(as.matrix(continuous_X), 4)
+
+# Combine with the binary variables
+model1.5_X <- as.matrix(cbind(continuous_X_poly1, binary_X))
+
+
+library(glmnet)
+
+
+set.seed(6123)
+l <- exp(seq(from = -4, to = 5, length = 100))
+
+model1.5_CV <- cv.glmnet(x = model1.5_X, y = tw, lambdas = l, alpha = 1)
+model1.5 <- glmnet(x = model1.5_X, y = tw, lambda = model1.5_CV$lambda.min, alpha = 1)
+
+
+# Check betas
+model1$beta
+model1.5$beta
+
+
+# Model 2
+library(splines)
+
+model2 <- lm(tw ~ bs(ira, df = 20) + bs(nifa, df = 20) + bs(hequity, df = 20) + . , data = data)
+
+summary(model2)
+
+
+resid_df <- data.frame(
+  Residuals = residuals(model2),
+  Fitted = fitted(model2)
+)
+
+ggplot(resid_df, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0,
+  col = "blue") +
+  ggtitle("Residuals Plot") +
+  xlab("Fitted Values") +
+  ylab("Residuals")
+
+# Model 2.5
+
+model2.5 <- lm(tw ~ bs(ira, df = 30) + bs(nifa, df = 30) + bs(hequity, df = 30) + bs(nifa*marr, df = 30) + bs(twoearn*hequity, df = 30) + bs(inc*twoearn, df = 30) + . , data = data)
+
+resid_df <- data.frame(
+  Residuals = residuals(model2.5),
+  Fitted = fitted(model2.5)
+)
+
+ggplot(resid_df, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0,
+             col = "blue") +
+  ggtitle("Residuals Plot") +
+  xlab("Fitted Values") +
+  ylab("Residuals")
+
+## ---------------------------------------------------------
+# Compare MSE
+
+MSE_0 <- mean(model0$residuals^2)
+MSE_0.5 <- mean(model0.5$residuals^2)
+MSE_1 <- mean((predict(model1, newx = model1_X) - tw)^2)
+MSE_1.5 <- mean((predict(model1.5, newx = model1.5_X) - tw)^2)
+MSE_2 <- mean(model2$residuals^2)
+MSE_2.5 <- mean(model2.5$residuals^2)
+
+cbind(MSE_0, MSE_0.5, MSE_1, MSE_1.5, MSE_2, MSE_2.5)
+
+
+## ---------------------------------------------------------
+cbind(MSE_0, MSE_0.5, MSE_1, MSE_1.5, MSE_2, MSE_2.5)^0.5
+
+
+## Compare models via K-fold Cross Validation
+## ---------------------------------------------------------
+k <- 10
+n <- length(tw)
+
+set.seed(7142)
+id <- sample(rep(1:k, length = n))
+
+MSPE_0 <- MSPE_0.5 <- MSPE_1 <- MSPE_1.5 <- MSPE_2 <- MSPE_2.5 <- vector(length = k)
+
+for(f in 1:k) {
+  train <- (id != f)
+  test <- (id == f)
+  
+  # The lm models are simple. Just need to use data_train
+  model0 <- lm(tw ~ ., data = data[train,])
+  model0.5 <- lm(tw ~ nifa*marr + twoearn*hequity + marr*twoearn + ., data = data[train,])
+  model2 <- lm(tw ~ bs(ira, df = 30) + bs(nifa, df = 30) + bs(hequity, df = 30) + . , data = data[train,])
+  model2.5 <- lm(tw ~ bs(ira, df = 30) + bs(nifa, df = 30) + bs(hequity, df = 30) + bs(nifa*marr, df = 30) + bs(twoearn*hequity, df = 30) + bs(inc*twoearn, df = 30) + . , data = data[train,])
+ 
+
+  
+  # For the glmnet model, we need to perform the same variable transformation we did before.
+  # Since we already did the variable transformation earlier, just need to save the training observations.
+  l <- exp(seq(from = -4, to = 5, length = 100))
+  model1_CV <- cv.glmnet(x = model1_X[train,], y = tw[train], lambdas = l, alpha = 1)
+  model1 <- glmnet(x = model1_X[train,], y = tw[train], lambda = model1_CV$lambda.min, alpha = 1)
+  
+  
+  ## Now we need to make predictions
+  pr_0 <- predict(model0, newdata = data[test,])
+  pr_0.5 <- predict(model0.5, newdata = data[test,])
+  pr_1 <- predict(model1, newx = model1_X[test,])
+  pr_1.5 <- predict(model1.5, newx = model1.5_X[test,])
+  pr_2 <- predict(model2, newdata = data[test,])
+  pr_2.5 <- predict(model2.5, newdata = data[test,])
+  
+  MSPE_0 <- mean((pr_0 - tw[test])^2)
+  MSPE_0.5 <- mean((pr_0.5 - tw[test])^2)
+  MSPE_1 <- mean((pr_1 - tw[test])^2)
+  MSPE_1.5 <- mean((pr_1.5 - tw[test])^2)
+  MSPE_2 <- mean((pr_2 - tw[test])^2)
+  MSPE_2.5 <- mean((pr_2.5 - tw[test])^2)
+}
+
+cbind(mean(MSPE_0), mean(MSPE_0.5), mean(MSPE_1), mean(MSPE_1.5), mean(MSPE_2), mean(MSPE_2.5))^(0.5)
+
+
+## Selected Model 1.5
+
+# Transformation of continuous X variables:
+continuous_X_poly <- poly(as.matrix(continuous_X), 4)
+
+# Combine with the binary variables
+model1.5_X <- as.matrix(cbind(continuous_X_poly, binary_X))
+
+
+# Set seed for consistency
+set.seed(6123)
+l <- exp(seq(from = -4, to = 5, length = 100))
+
+chosen_model_CV <- cv.glmnet(x = model1.5_X, y = tw, lambdas = l, alpha = 1)
+chosen_model <- glmnet(x = model1.5_X, y = tw, lambda = chosen_model_CV$lambda.min, alpha = 1)
+
+
+## Make predictions for prediction challenge
+## ---------------------------------------------------------
+### We now want to make the predictions 
+data_test <- read.table('data_for_prediction.txt', head = T)
+# data_test <- read.table('../../data/data_for_prediction.txt', head = T)
+### Predict using this data
+
+head(data_test)
+dim(data_test)
+
+
+## ---------------------------------------------------------
+## Make the same variable transformations we made earlier
+
+# Remove the collinear variables.
+#data_test <- subset(data_test, select = keep[-1])
+data_test <- select(data_test, -hval, -hmort, -col)
+
+# Rescale predictors
+data_test <- as.data.frame(scale(data_test))
+
+continuous_X_test <- subset(data_test, select = c(ira, nifa, inc, educ, hequity, age, fsize))
+binary_X_test <- subset(data_test, select = c(e401, male, twoearn, nohs, hs, smcol, marr))
+
+# Transformation of continuous X variables:
+continuous_X_poly_test <- poly(as.matrix(continuous_X_test), 4)
+
+# Combine with the binary variables
+chosen_model_X_test <- as.matrix(cbind(continuous_X_poly_test, binary_X_test))
+
+
+## ---------------------------------------------------------
+pred <- predict(chosen_model, newx = chosen_model_X_test)
+
+length(pred)
+
+
+## ---------------------------------------------------------
+write.table(pred, file = 'my_predictions.txt')
+
